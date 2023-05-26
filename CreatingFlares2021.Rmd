@@ -93,3 +93,55 @@ for (k in 1:12) {
 save(Flares2021, file="C:/Users/bklingen/Downloads/Flares/Flares2021.r")
 
 ```
+
+Now, create a matrix with 61 columns, where column nr. 31 is the time point at which a flare occurred, columns 1 - 30 are the values of the previous 30 fluxes (so, going back 30 minutes), and columns 32 - 61 are the values of the 30 fluxes after the declared flare:
+```{r}
+## Load in Flares2021 dataset
+load(file="C:/Users/bklingen/Downloads/Flares/Flares2021.r")
+flare_indices = which(Flares2021$Flare == 1)
+numFlares = length(flare_indices)
+FlareProfiles = matrix(NA, nrow=numFlares, ncol=63)
+j = 1
+for (i in flare_indices){
+  if(i > 30 && i <= nrow(Flares2021) - 30) {
+    FlareProfiles[j,] = c( ## standardize fluxes, equals 0 for flux at flar eevent
+      (Flares2021$Flux[i] - Flares2021$Flux[(i-30) : (i + 30)]) / Flares2021$Flux[i],
+      1,
+      Flares2021$secs_since_2000[i]
+    )
+    j = j + 1
+  }
+}
+
+## Controls: pick random index:
+NotFlareProfiles = matrix(NA, nrow=50*numFlares, ncol=63)
+nonflare_indices = setdiff(c(1:nrow(Flares2021)), flare_indices)
+j = 1
+for (i in sample(nonflare_indices, 50*numFlares)){
+  if(i > 30 && i <= nrow(Flares2021) - 30) {
+    NotFlareProfiles[j,] = c(
+      (Flares2021$Flux[i] - Flares2021$Flux[(i-30) : (i + 30)]) / Flares2021$Flux[i],
+      0,
+      Flares2021$secs_since_2000[i]
+    )
+    j = j + 1
+  }
+}
+
+library(tidyr)
+library(dplyr)
+library(readr)
+Profiles = as_tibble(rbind(FlareProfiles, NotFlareProfiles))
+dim(Profiles)
+colnames(Profiles) = c(paste0('x', 1:61), 'y', 'SecsSince2000')
+
+Profiles = Profiles %>% 
+  drop_na() %>%  
+  mutate(Date = as.POSIXct(SecsSince2000, origin = "2000-01-01 12:00:00")) %>% 
+  select(-SecsSince2000)
+
+ProfilesShuffeled = Profiles[sample(1:nrow(Profiles)),]
+save(ProfilesShuffeled, file="C:/Users/bklingen/Downloads/Flares/ProfilesShuffeled.r")
+
+======#write_csv(as.data.frame(ProfilesShuffeled) , file="C:/Users/bklingen/Downloads/Flares/ProfilesShuffeled.csv")
+```
