@@ -1,0 +1,95 @@
+---
+title: "CreateFlareData"
+output: pdf_document
+date: "2023-05-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Write function that takes in the two nc files (one for 1-min flux, the other one for identified flares), and returns the dataset of 1-min peak-fluxes, with an additional column whether a flare was identified.
+```{r}
+library(ncdf4)
+library(dplyr)
+library(readr)
+library(RCurl)
+
+makeFlaredf <- function(i='01', type='b', 
+                        fluxFileName = '01/sci_xrsf-l2-avg1m_g16_d20210101_v2-2-0.nc', 
+                        flareFileName = '01/sci_xrsf-l2-flsum_g16_d20210101_v2-2-0.nc') {
+  # Download 1-min flux info:
+  fluxUrl0 = 'https://data.ngdc.noaa.gov/platforms/solar-space-observing-satellites/goes/goes16/l2/data/xrsf-l2-avg1m_science/2021/'
+  fluxUrl = paste0(fluxUrl0,fluxFileName)
+  if(url.exists(fluxUrl)) {
+    fluxDestFile <- paste0("C:/Users/bklingen/Downloads/Flares/flux", i, ".nc")
+    download.file(fluxUrl, fluxDestFile, method = 'auto', mode='wb')
+    Flux0 = nc_open(fluxDestFile)
+    dfFlux = tibble(
+      secs_since_2000 = ncvar_get(Flux0, varid="time"),
+      Date = as.POSIXct(secs_since_2000, origin = "2000-01-01 12:00:00"),
+      Flux = ncvar_get(Flux0, varid=paste0("xrs",type,"_flux")),
+    )
+    nc_close(Flux0)
+    #file.remove(fluxDestFile)
+  } else {
+    dfFlux = tibble(
+      as.Date(character())
+    )
+  }
+    
+  # Download flare occurrence info:
+  flareUrl0 = 'https://data.ngdc.noaa.gov/platforms/solar-space-observing-satellites/goes/goes16/l2/data/xrsf-l2-flsum_science/2021/'
+  flareUrl = paste0(flareUrl0,flareFileName)
+  if(url.exists(flareUrl)) {
+    flareDestFile <- paste0("C:/Users/bklingen/Downloads/Flares/flare", i , ".nc")
+    download.file(flareUrl, flareDestFile, method = 'auto', mode='wb')
+    Flare0 = nc_open(flareDestFile)
+    dfFlares = tibble(
+      secs_since_2000 = ncvar_get(Flare0, varid="time"),
+      Status = ncvar_get(Flare0, varid="status"),
+    )
+    nc_close(Flare0)
+  } else {
+    dfFlares = tibble(
+      secs_since_2000 = integer(),
+      Status = character(),
+    )
+  }
+  ## joint dfFlux and dfFlare data:
+  df = left_join( x = dfFlux,
+                  y = dfFlares,
+                  by = 'secs_since_2000')
+
+  return(df %>% mutate(Flare = if_else(Status == 'EVENT_PEAK', 1, 0, missing = 0)))
+}
+```
+
+Cycle over all 12 month in 2021:
+```{r}
+Flares2021 = tibble(
+      secs_since_2000 = integer(),
+      Date = as.Date(character()),
+      Flux = numeric(),
+      Status = character(),
+      Flare = integer()
+)
+
+monthDays = c(31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+monthNum = c('01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12') 
+
+
+for (k in 1:12) {
+  days <- formatC(seq(1, monthDays[k]), width = 2, format = "d", flag = "0")
+
+  for(i in days) {
+    fluxFileName =  paste0(monthNum[k], '/sci_xrsf-l2-avg1m_g16_d2021', monthNum[k], i , '_v2-2-0.nc')
+    flareFileName = paste0(monthNum[k], '/sci_xrsf-l2-flsum_g16_d2021', monthNum[k], i , '_v2-2-0.nc')
+    df0 = makeFlaredf(i, type='b', fluxFileName=fluxFileName, flareFileName=flareFileName)
+    Flares2021 = bind_rows(Flares2021,df0)
+  }
+}
+
+save(Flares2021, file="C:/Users/bklingen/Downloads/Flares/Flares2021.r")
+
+```
