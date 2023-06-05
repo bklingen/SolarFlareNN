@@ -1,0 +1,259 @@
+---
+title: "CreateFlareData"
+output: pdf_document
+date: "2023-05-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Function that obtains flare info from GOES website
+
+Write function that takes in the two nc files (one for 1-min flux, the other one for identified flares), and returns the dataset of 1-min peak-fluxes, with an additional column whether a flare was identified.
+```{r}
+library(ncdf4)
+library(dplyr)
+library(readr)
+library(RCurl)
+
+makeFlaredf <- function(goesNr = 16, 
+                        year = 2021, 
+                        month = '01', 
+                        day = '01',
+                        type='b') {
+  # Download 1-min flux info:
+  if(goesNr >= 16) {
+    fluxUrl0 = paste0('https://data.ngdc.noaa.gov/platforms/solar-space-observing-satellites/goes/goes', goesNr,'/l2/data/xrsf-l2-avg1m_science/', year, '/', month, '/')
+  } else {
+    fluxUrl0 = paste0('https://data.ngdc.noaa.gov/platforms/solar-space-observing-satellites/goes/goes', goesNr,'/l2/data/xrsf-l2-avg1m_science/', year, '/', month, '/')
+  }
+  fluxFileName = paste0('sci_xrsf-l2-avg1m_g', goesNr, '_d', year, month, day, '_v2-2-0.nc') 
+  fluxUrl = paste0(fluxUrl0,fluxFileName)
+  
+  if(url.exists(fluxUrl)) {
+    fluxDestFile <- paste0("C:/Users/bklingen/Downloads/Flares/flux", i, ".nc")
+    download.file(fluxUrl, fluxDestFile, method = 'auto', mode='wb')
+    Flux0 = nc_open(fluxDestFile)
+    dfFlux = tibble(
+      secs_since_2000 = ncvar_get(Flux0, varid="time"),
+      Date = as.POSIXct(secs_since_2000, origin = "2000-01-01 12:00:00"),
+      Flux = ncvar_get(Flux0, varid=paste0("xrs",type,"_flux")),
+    )
+    nc_close(Flux0)
+    #file.remove(fluxDestFile)
+  } else {
+    dfFlux = tibble(
+      as.Date(character())
+    )
+  }
+    
+  # Download flare occurrence info:
+  if (goesNr >= 16) {
+    flareUrl0 = paste0('https://data.ngdc.noaa.gov/platforms/solar-space-observing-satellites/goes/goes', goesNr, '/l2/data/xrsf-l2-flsum_science/', year, '/', month, '/')
+  } else {
+    flareUrl0 = paste0('https://www.ncei.noaa.gov/data/goes-space-environment-monitor/access/science/xrs/goes', goesNr, '/xrsf-l2-flsum_science/', year, '/', month, '/')
+  }
+  flareFileName = paste0('sci_xrsf-l2-flsum_g', goesNr, '_d', year, month, day, '_v2-2-0.nc')
+  flareUrl = paste0(flareUrl0,flareFileName)
+  
+  if(url.exists(flareUrl)) {
+    flareDestFile <- paste0("C:/Users/bklingen/Downloads/Flares/flare", i , ".nc")
+    download.file(flareUrl, flareDestFile, method = 'auto', mode='wb')
+    Flare0 = nc_open(flareDestFile)
+    dfFlares = tibble(
+      secs_since_2000 = ncvar_get(Flare0, varid="time"),
+      Status = ncvar_get(Flare0, varid="status"),
+    )
+    nc_close(Flare0)
+  } else {
+    dfFlares = tibble(
+      secs_since_2000 = integer(),
+      Status = character(),
+    )
+  }
+  ## joint dfFlux and dfFlare data:
+  df = left_join( x = dfFlux,
+                  y = dfFlares,
+                  by = 'secs_since_2000')
+
+  return(df %>% mutate(Flare = if_else(Status == 'EVENT_PEAK', 1, 0, missing = 0)))
+}
+```
+
+## Create 2021 datafile of all identified flares
+We obtain a dataset of all identified flares and supplement (at a ratio of 50 non-flare profiles for every one flare profile) the dataset with non-flare profiles
+
+Cycle over all 12 month in 2021:
+```{r}
+Flares2021 = tibble(
+      secs_since_2000 = integer(),
+      Date = as.Date(character()),
+      Flux = numeric(),
+      Status = character(),
+      Flare = integer()
+)
+
+monthDays = c(31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+monthNum = c('01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12') 
+
+
+for (k in 1:12) {
+  days <- formatC(seq(1, monthDays[k]), width = 2, format = "d", flag = "0")
+
+  for(i in days) {
+    df0 = makeFlaredf(
+      goesNr = 16,
+      year = 2021,
+      month = monthNum[k],
+      day = i, 
+      type='b')
+    Flares2021 = bind_rows(Flares2021,df0)
+  }
+}
+
+save(Flares2021, file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2021.r")
+
+```
+
+Now, create a matrix with 61 columns, where column nr. 31 is the time point at which a flare occurred, columns 1 - 30 are the values of the previous 30 fluxes (so, going back 30 minutes), and columns 32 - 61 are the values of the 30 fluxes after the declared flare:
+```{r}
+## Load in Flares2021 dataset
+#load(file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2021.r")
+flare_indices = which(Flares2021$Flare == 1)
+numFlares = length(flare_indices)
+FlareProfiles = matrix(NA, nrow=numFlares, ncol=63)
+j = 1
+for (i in flare_indices){
+  if(i > 30 && i <= nrow(Flares2021) - 30) {
+    FlareProfiles[j,] = c( ## standardize fluxes, equals 0 for flux at flar eevent
+      (Flares2021$Flux[i] - Flares2021$Flux[(i-30) : (i + 30)]) / Flares2021$Flux[i],
+      1,
+      Flares2021$secs_since_2000[i]
+    )
+    j = j + 1
+  }
+}
+
+## Controls: pick random index:
+NotFlareProfiles = matrix(NA, nrow=50*numFlares, ncol=63)
+nonflare_indices = setdiff(c(1:nrow(Flares2021)), flare_indices)
+j = 1
+for (i in sample(nonflare_indices, 50*numFlares)){
+  if(i > 30 && i <= nrow(Flares2021) - 30) {
+    NotFlareProfiles[j,] = c(
+      (Flares2021$Flux[i] - Flares2021$Flux[(i-30) : (i + 30)]) / Flares2021$Flux[i],
+      0,
+      Flares2021$secs_since_2000[i]
+    )
+    j = j + 1
+  }
+}
+
+library(tidyr)
+library(dplyr)
+library(readr)
+Profiles = as_tibble(rbind(FlareProfiles, NotFlareProfiles))
+dim(Profiles)
+colnames(Profiles) = c(paste0('x', 1:61), 'y', 'SecsSince2000')
+
+Profiles = Profiles %>% 
+  drop_na() %>%  
+  mutate(Date = as.POSIXct(SecsSince2000, origin = "2000-01-01 12:00:00")) %>% 
+  select(-SecsSince2000)
+
+ProfilesShuffeled2021 = Profiles[sample(1:nrow(Profiles)),]
+save(ProfilesShuffeled2021, file="C:/Users/bklingen/Desktop/SolarFlareNN/ProfilesShuffeled2021.r")
+#load(file="C:/Users/bklingen/Desktop/SolarFlareNN/ProfilesShuffeled2021.r")
+library(readr)
+write_csv(as.data.frame(ProfilesShuffeled2021) , file="C:/Users/bklingen/Desktop/SolarFlareNN/ProfilesShuffeled2021.csv")
+```
+
+
+
+## Get dataset for 2022 data:
+Cycle over all 12 month in 2022:
+```{r}
+Flares2022 = tibble(
+      secs_since_2000 = integer(),
+      Date = as.Date(character()),
+      Flux = numeric(),
+      Status = character(),
+      Flare = integer()
+)
+
+monthDays = c(31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+monthNum = c('01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12') 
+
+
+for (k in 1:12) {
+  days <- formatC(seq(1, monthDays[k]), width = 2, format = "d", flag = "0")
+
+  for(i in days) {
+    df0 = makeFlaredf(
+      goesNr = 16,
+      year = 2022,
+      month = monthNum[k],
+      day = i, 
+      type='b')
+    Flares2022 = bind_rows(Flares2022,df0)
+  }
+}
+
+save(Flares2022, file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2022.r")
+
+```
+
+Now, create a matrix with 61 columns, where column nr. 31 is the time point at which a flare occurred, columns 1 - 30 are the values of the previous 30 fluxes (so, going back 30 minutes), and columns 32 - 61 are the values of the 30 fluxes after the declared flare:
+```{r}
+## Load in Flares2022 dataset
+
+#load(file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2022.r")
+flare_indices = which(Flares2022$Flare == 1)
+numFlares = length(flare_indices)
+FlareProfiles = matrix(NA, nrow=numFlares, ncol=63)
+j = 1
+for (i in flare_indices){
+  if(i > 30 && i <= nrow(Flares2022) - 30) {
+    FlareProfiles[j,] = c( ## standardize fluxes, equals 0 for flux at flare event
+      (Flares2022$Flux[i] - Flares2022$Flux[(i-30) : (i + 30)]) / Flares2022$Flux[i],
+      1,
+      Flares2022$secs_since_2000[i]
+    )
+    j = j + 1
+  }
+}
+
+## Controls: pick random index:
+NotFlareProfiles = matrix(NA, nrow=50*numFlares, ncol=63)
+nonflare_indices = setdiff(c(1:nrow(Flares2022)), flare_indices) #could exclude further flares, say all those withing +/- 2 minutes of flare
+j = 1
+for (i in sample(nonflare_indices, 50*numFlares)){
+  if(i > 30 && i <= nrow(Flares2022) - 30) {
+    NotFlareProfiles[j,] = c(
+      (Flares2022$Flux[i] - Flares2022$Flux[(i-30) : (i + 30)]) / Flares2022$Flux[i],
+      0,
+      Flares2022$secs_since_2000[i]
+    )
+    j = j + 1
+  }
+}
+
+library(tidyr)
+library(dplyr)
+library(readr)
+Profiles = as_tibble(rbind(FlareProfiles, NotFlareProfiles))
+dim(Profiles)
+colnames(Profiles) = c(paste0('x', 1:61), 'y', 'SecsSince2000')
+
+Profiles = Profiles %>% 
+  drop_na() %>%  
+  mutate(Date = as.POSIXct(SecsSince2000, origin = "2000-01-01 12:00:00")) %>% 
+  select(-SecsSince2000)
+
+ProfilesShuffeled2022 = Profiles[sample(1:nrow(Profiles)),]
+save(ProfilesShuffeled2022, file="C:/Users/bklingen/Desktop/SolarFlareNN/ProfilesShuffeled2022.r")
+#load(file="C:/Users/bklingen/Desktop/SolarFlareNN/ProfilesShuffeled2022.r")
+library(readr)
+write_csv(as.data.frame(ProfilesShuffeled2022) , file="C:/Users/bklingen/Desktop/SolarFlareNN/ProfilesShuffeled2022.csv")
+```
