@@ -82,7 +82,7 @@ makeFlaredf <- function(goesNr = 16,
 ```
 
 ## Create 2021 datafile of all identified flares
-We obtain a dataset of all identified flares and supplement (at a ratio of 50 non-flare profiles for every one flare profile) the dataset with non-flare profiles
+We obtain a dataset of all identified flares and supplement (at a ratio of `nonflareMultiple` non-flare profiles for every one flare profile) the dataset with non-flare profiles
 
 Cycle over all 12 month in 2021:
 ```{r}
@@ -112,7 +112,7 @@ for (k in 1:12) {
   }
 }
 
-save(Flares2021, file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2021.r")
+# save(Flares2021, file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2021.r")
 
 ```
 
@@ -122,14 +122,16 @@ Now, create a matrix with 61 columns, where column nr. 31 is the time point at w
 #load(file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2021.r")
 flare_indices = which(Flares2021$Flare == 1)
 numFlares = length(flare_indices)
-hist1 = 30
-hist2 = 15
+hist1 = 60
+hist2 = 30
+nonflareMultiple = 30 # how many non-flares per flare
 FlareProfiles = matrix(NA, nrow=numFlares, ncol=hist1 + hist2 + 1 + 1 + 1)
 j = 1
 for (i in flare_indices){
   if(i > hist1 && i <= nrow(Flares2021) - hist2) {
     FlareProfiles[j,] = c( ## standardize fluxes, equals 0 for flux at flare event
-      (Flares2021$Flux[i] - Flares2021$Flux[(i-hist1) : (i + hist2)]) / Flares2021$Flux[i],
+      #(Flares2021$Flux[i] - Flares2021$Flux[(i-hist1) : (i + hist2)]) / Flares2021$Flux[i],
+      Flares2021$Flux[(i-hist1) : (i + hist2)] / Flares2021$Flux[i],
       1,
       Flares2021$secs_since_2000[i]
     )
@@ -138,18 +140,19 @@ for (i in flare_indices){
 }
 
 ## Controls: pick random index:
-NotFlareProfiles = matrix(NA, nrow=50*numFlares, ncol=hist1 + hist2 + 1 + 1 + 1)
+NotFlareProfiles = matrix(NA, nrow=nonflareMultiple*numFlares, ncol=hist1 + hist2 + 1 + 1 + 1)
 nonflare_indices = setdiff( #rule out those within 3 minutes of peak flare
   c((hist1 + 1) : (nrow(Flares2021)- (hist2 + 1))), 
   c(flare_indices, 
-    flare_indices - 1, flare_indices - 2, flare_indices - 3,
-    flare_indices + 1, flare_indices + 2, flare_indices + 3
+    flare_indices - 1, flare_indices - 2, flare_indices - 3, flare_indices - 4, flare_indices - 5, flare_indices - 6,
+    flare_indices + 1, flare_indices + 2, flare_indices + 3, flare_indices - 4, flare_indices - 5, flare_indices - 6
     )
 )
 j = 1
-for (i in sample(nonflare_indices, 50*numFlares)){ #select random index
+for (i in sample(nonflare_indices, nonflareMultiple*numFlares)){ #select random index
   NotFlareProfiles[j,] = c(
-    (Flares2021$Flux[i] - Flares2021$Flux[(i-hist1) : (i + hist2)]) / Flares2021$Flux[i],
+    #(Flares2021$Flux[i] - Flares2021$Flux[(i-hist1) : (i + hist2)]) / Flares2021$Flux[i],
+    Flares2021$Flux[(i-hist1) : (i + hist2)] / Flares2021$Flux[i],
     0,
     Flares2021$secs_since_2000[i]
   )
@@ -206,7 +209,7 @@ for (k in 1:12) {
   }
 }
 
-save(Flares2022, file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2022.r")
+#save(Flares2022, file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2022.r")
 
 ```
 
@@ -221,7 +224,8 @@ j = 1
 for (i in flare_indices){
   if(i > hist1 && i <= nrow(Flares2022) - hist2) {
     FlareProfiles[j,] = c( ## standardize fluxes, equals 0 for flux at flare event
-      (Flares2022$Flux[i] - Flares2022$Flux[(i-hist1) : (i + hist2)]) / Flares2022$Flux[i],
+      #(Flares2022$Flux[i] - Flares2022$Flux[(i-hist1) : (i + hist2)]) / Flares2022$Flux[i],
+      Flares2022$Flux[(i-hist1) : (i + hist2)] / Flares2022$Flux[i],
       1,
       Flares2022$secs_since_2000[i]
     )
@@ -230,18 +234,19 @@ for (i in flare_indices){
 }
 
 ## Controls: pick random index:
-NotFlareProfiles = matrix(NA, nrow=50*numFlares, ncol=hist1 + hist2 + 1 + 1 + 1)
+NotFlareProfiles = matrix(NA, nrow=nonflareMultiple*numFlares, ncol=hist1 + hist2 + 1 + 1 + 1)
 nonflare_indices = setdiff( #rule out those within 3 minutes of peak flare
   c((hist1 + 1) : (nrow(Flares2022)- (hist2 + 1))), 
   c(flare_indices, 
-    flare_indices - 1, flare_indices - 2, flare_indices - 3,
-    flare_indices + 1, flare_indices + 2, flare_indices + 3
+    flare_indices - 1, flare_indices - 2, flare_indices - 3, flare_indices - 4, flare_indices - 5, flare_indices - 6,
+    flare_indices + 1, flare_indices + 2, flare_indices + 3, flare_indices - 4, flare_indices - 5, flare_indices - 6
     )
 )
 j = 1
-for (i in sample(nonflare_indices, 50*numFlares)){ #select random index
+for (i in sample(nonflare_indices, nonflareMultiple*numFlares)){ #select random index
   NotFlareProfiles[j,] = c(
-    (Flares2022$Flux[i] - Flares2022$Flux[(i-hist1) : (i + hist2)]) / Flares2022$Flux[i],
+    #(Flares2022$Flux[i] - Flares2022$Flux[(i-hist1) : (i + hist2)]) / Flares2022$Flux[i],
+    Flares2022$Flux[(i-hist1) : (i + hist2)] / Flares2022$Flux[i],
     0,
     Flares2022$secs_since_2000[i]
   )
@@ -272,6 +277,7 @@ write_csv(as.data.frame(ProfilesShuffeled2022) , file="C:/Users/bklingen/Desktop
 ```{r}
 ProfilesShuffeled2122 = rbind(ProfilesShuffeled2021, ProfilesShuffeled2022)
 ProfilesShuffeled2122 = ProfilesShuffeled2122[sample(1:nrow(ProfilesShuffeled2122)),]
+save(ProfilesShuffeled2122, file="C:/Users/bklingen/Desktop/SolarFlareNN/ProfilesShuffeled2122.r")
 write_csv(as.data.frame(ProfilesShuffeled2122) , file="C:/Users/bklingen/Desktop/SolarFlareNN/ProfilesShuffeled2122.csv")
 ```
 
@@ -351,6 +357,38 @@ ggsave(filename = 'C:/Users/bklingen/Desktop/SolarFlareNN/Jan21Predictions.png',
        height = 3,
        units = 'in')
 
+```
+
+## Plot 2021 flare data
+```{r}
+ggplot(data = Flares2021 %>%
+         filter(Date > '2021-02-22 02:00', Date < '2021-02-22 08:00'),
+       aes(x = Date, y = Flux)
+       ) +
+  geom_line(size=0.1)
+  #coord_cartesian(ylim=c(NA, 0.5e-05))
+```
+
+## Plot random flare profiles
+```{r}
+exampleFluxes = tibble(
+    flux = c(unlist(FlareProfiles[100, (1:(hist1+hist2+1))]),
+             unlist(FlareProfiles[50, (1:(hist1+hist2+1))]),
+             unlist(FlareProfiles[110, (1:(hist1+hist2+1))]),
+             unlist(NotFlareProfiles[1, (1:(hist1+hist2+1))]),
+             unlist(NotFlareProfiles[3, (1:(hist1+hist2+1))]),
+             unlist(NotFlareProfiles[10, (1:(hist1+hist2+1))])
+    ),
+    flare = rep(c(1,2,3,4,5,6), each=91),
+    type = rep(c('Yes','Yes','Yes', 'No', 'No','No'), each = 91),
+    dates = rep(seq(-60,30), 6)
+  )
+
+
+ggplot(data = exampleFluxes, aes(x = dates, y = flux, color=factor(flare))) +
+  geom_line(size=0.8)+
+  facet_wrap(vars(type))
+  #coord_cartesian(ylim=c(NA, 0.5e-05))
 ```
 
 
