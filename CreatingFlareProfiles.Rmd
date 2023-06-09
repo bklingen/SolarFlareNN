@@ -44,7 +44,9 @@ makeFlaredf <- function(goesNr = 16,
     #file.remove(fluxDestFile)
   } else {
     dfFlux = tibble(
-      as.Date(character())
+      secs_since_2000 = integer(),
+      Date = as.POSIXct(secs_since_2000, origin = "2000-01-01 12:00:00"),
+      Flux = numeric(),
     )
   }
     
@@ -77,43 +79,47 @@ makeFlaredf <- function(goesNr = 16,
                   y = dfFlares,
                   by = 'secs_since_2000')
 
-  return(df %>% mutate(Flare = if_else(Status == 'EVENT_PEAK', 1, 0, missing = 0)))
+  return(df %>% mutate(Flare = if_else(Status == 'EVENT_PEAK', 1, 0, missing = 0), GoesNr=goesNr))
 }
 ```
 
 ## Create 2021 datafile of all identified flares
 We obtain a dataset of all identified flares and supplement (at a ratio of `nonflareMultiple` non-flare profiles for every one flare profile) the dataset with non-flare profiles
 
-Cycle over all 12 month in 2021:
+Cycle over all 12 month in 2021, and Goes Satellites 16, 17 and 18:
 ```{r}
 Flares2021 = tibble(
       secs_since_2000 = integer(),
       Date = as.Date(character()),
       Flux = numeric(),
       Status = character(),
-      Flare = integer()
+      Flare = integer(),
+      GoesNr = integer()
 )
 
+goesNr = c(16,17,18)
 monthDays = c(31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
 monthNum = c('01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12') 
 
-
-for (k in 1:12) {
-  days <- formatC(seq(1, monthDays[k]), width = 2, format = "d", flag = "0")
-
-  for(i in days) {
-    df0 = makeFlaredf(
-      goesNr = 16,
-      year = 2021,
-      month = monthNum[k],
-      day = i, 
-      type='b')
-    Flares2021 = bind_rows(Flares2021,df0)
+for (goes in goesNr) {
+  for (k in 1:12) {
+    days <- formatC(seq(1, monthDays[k]), width = 2, format = "d", flag = "0")
+  
+    for(i in days) {
+      df0 = makeFlaredf(
+        goesNr = goes,
+        year = 2021,
+        month = monthNum[k],
+        day = i, 
+        type='b')
+      Flares2021 = bind_rows(Flares2021,df0)
+    }
   }
 }
 
-# save(Flares2021, file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2021.r")
 
+save(Flares2021, file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2021.r")
+Flares2021 %>% group_by(GoesNr) %>% select(Flare) %>% summarise(sum(Flare))
 ```
 
 Now, create a matrix with 61 columns, where column nr. 31 is the time point at which a flare occurred, columns 1 - hist are the values of the previous hist fluxes (so, going back hist minutes), and columns 32 - 61 are the values of the hist fluxes after the declared flare:
@@ -191,24 +197,28 @@ Flares2022 = tibble(
       Date = as.Date(character()),
       Flux = numeric(),
       Status = character(),
-      Flare = integer()
+      Flare = integer(),
+      GoesNr = integer()
 )
 
 monthDays = c(31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
 monthNum = c('01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12') 
 
+goesNr = c(16,17,18)
 
-for (k in 1:12) {
-  days <- formatC(seq(1, monthDays[k]), width = 2, format = "d", flag = "0")
-
-  for(i in days) {
-    df0 = makeFlaredf(
-      goesNr = 16,
-      year = 2022,
-      month = monthNum[k],
-      day = i, 
-      type='b')
-    Flares2022 = bind_rows(Flares2022,df0)
+for (goes in goesNr) {
+  for (k in 1:12) {
+    days <- formatC(seq(1, monthDays[k]), width = 2, format = "d", flag = "0")
+  
+    for(i in days) {
+      df0 = makeFlaredf(
+        goesNr = goes,
+        year = 2022,
+        month = monthNum[k],
+        day = i, 
+        type='b')
+      Flares2022 = bind_rows(Flares2022,df0)
+    }
   }
 }
 
@@ -391,7 +401,7 @@ write_csv(as.data.frame(Feb22FlareProfiles) , file="C:/Users/bklingen/Desktop/So
 ```{r}
 Feb22Pred = read_csv(file="C:/Users/bklingen/Desktop/SolarFlareNN/Feb22Predictions.csv", col_names='predProb')
 Feb22Flares1 = cbind(Feb22Flares[Feb22Indices,], Feb22Pred)
-cutoff = 0.02
+cutoff = 0.05
 Feb22Flares1 = Feb22Flares1 %>% mutate(yhat = 1*(predProb > cutoff), predProb = round(predProb,4),
                                        agree = factor(10*Flare + yhat, levels = c(0,1,10,11), labels=c('nf,nf', 'nf,f', 'f,nf', 'f,f')))
 #head(Feb22Flares1)
@@ -425,9 +435,12 @@ Feb22Plotdata = Feb22Flares1 %>%
   filter(Date > '2022-02-02 00:00', Date < '2022-02-11 23:59') %>%
   arrange()
 
+table(Feb22Plotdata$Flare, Feb22Plotdata$yhat)
+
+
 fluxPlot3 = ggplot(data=Feb22Plotdata
                    , aes(x=Date, y=Flux)) + 
-  geom_point(data = Feb22Plotdata %>% filter(agree != 'nf,nf'), aes(fill = agree), size = 1, pch=21, alpha=1, color='transparent') +
+  geom_point(data = Feb22Plotdata %>% filter(agree %in% c('f,f', 'nf,f')), aes(fill = agree), size = 1, pch=21, alpha=1, color='transparent') +
   #geom_vline(data = Feb22Plotdata %>% filter(Flare == 1), aes(xintercept=Date), color='red', linewidth=0.3) +
   geom_line(color=gray(0.2), alpha=0.6, linewidth=0.25) +
   coord_cartesian(y = c(NA,6e-06)) +
