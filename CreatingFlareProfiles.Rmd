@@ -33,7 +33,7 @@ makeFlaredf <- function(goesNr = 16,
   fluxUrl = paste0(fluxUrl0,fluxFileName)
   
   if(url.exists(fluxUrl)) {
-    fluxDestFile <- paste0("C:/Users/bklingen/Downloads/Flares/flux", i, ".nc")
+    fluxDestFile <- paste0("C:/Users/bklingen/Downloads/Flares/flux.nc")
     download.file(fluxUrl, fluxDestFile, method = 'auto', mode='wb')
     Flux0 = nc_open(fluxDestFile)
     dfFlux = tibble(
@@ -61,7 +61,7 @@ makeFlaredf <- function(goesNr = 16,
   flareUrl = paste0(flareUrl0,flareFileName)
   
   if(url.exists(flareUrl)) {
-    flareDestFile <- paste0("C:/Users/bklingen/Downloads/Flares/flare", i , ".nc")
+    flareDestFile <- paste0("C:/Users/bklingen/Downloads/Flares/flare.nc")
     download.file(flareUrl, flareDestFile, method = 'auto', mode='wb')
     Flare0 = nc_open(flareDestFile)
     dfFlares = tibble(
