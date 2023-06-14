@@ -159,6 +159,7 @@ save(Flares2021, file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2021.r")
 
 
 load(file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2021.r")
+table(Flares2021$Flare16, Flares2021$Flare17)
 
 ```
 
@@ -169,8 +170,8 @@ Now, create a matrix with 61 columns, where column nr. 31 is the time point at w
 load(file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2021.r")
 flare_indices = which(Flares2021$Flare == 1)
 numFlares = length(flare_indices)
-hist1 = 30
-hist2 = 15
+hist1 = 10
+hist2 = 10
 nonflareMultiple = 30 # how many non-flares per flare
 FlareProfiles = matrix(NA, nrow=numFlares, ncol=hist1 + hist2 + 1 + 1 + 1)
 j = 1
@@ -697,8 +698,8 @@ write_csv(as.data.frame(Feb23FlareProfiles) , file="C:/Users/bklingen/Desktop/So
 ```{r}
 Feb23Pred = read_csv(file="C:/Users/bklingen/Desktop/SolarFlareNN/Feb23Predictions.csv", col_names='predProb')
 Feb23Flares1 = cbind(Feb23Flares[Feb23Indices,], Feb23Pred)
-cutoff = 0.005 #0.00270
-Feb23Flares1 = Feb23Flares1 %>% mutate(yhat = 1*(predProb > cutoff), predProb = round(predProb,4),
+cutoff = 0.0221 #0.00270
+Feb23Flares1 = Feb23Flares1 %>% mutate(yhat = 1*(predProb > cutoff), predProb = round(predProb,5),
                                        agree = factor(10*Flare + yhat, levels = c(0,1,10,11), labels=c('nf,nf', 'nf,f', 'f,nf', 'f,f')))
 #head(Feb23Flares1)
 table(Feb23Flares1$Flare, Feb23Flares1$yhat)
@@ -718,7 +719,7 @@ fluxPlot2
 ```
 
 Or, coloring dots:
-```{r, fig.width=4, fig.height=1.5}
+```{r, fig.width=4, fig.height=3}
 library(ggplot2)
 
 summary(Feb23Flares1$agree)
@@ -730,33 +731,40 @@ table(Feb23Plotdata$Flare, Feb23Plotdata$yhat)
 
 fluxPlot3 = ggplot(data=Feb23Plotdata, 
                    aes(x=Date, y=Flux)) + 
-  geom_point(data = Feb23Plotdata %>% filter(agree %in% c('nf,f')), size = 0.8, pch=19, color="green", alpha=0.5) +
-  geom_point(data = Feb23Plotdata %>% filter(agree %in% c('f,f')), size = 0.8, pch=19, color="red", alpha=0.5) +
-
+  # geom_point(data = Feb23Plotdata %>% filter(agree %in% c('nf,f')), size = 0.8, pch=19, color="green", alpha=0.5) +
+  # geom_point(data = Feb23Plotdata %>% filter(agree %in% c('f,f')), size = 0.8, pch=19, color="red", alpha=0.5) +
+  geom_point(data = Feb23Plotdata %>% filter(agree %in% c('nf,f', 'f,f')), aes(color=agree), size = 2, pch=19, alpha=0.6) +
   #geom_vline(data = Feb23Plotdata %>% filter(Flare == 1), aes(xintercept=Date), color='red', linewidth=0.3) +
-  geom_line(color=gray(0.2), alpha=0.6, linewidth=0.25) +
+  #geom_vline(data = Feb23Plotdata %>% filter(yhat == 1), aes(xintercept=Date), color='green', linewidth=0.3) +
+  geom_line(color=gray(0.25), alpha=0.8, linewidth=0.75) +
   #coord_cartesian(y = c(NA,3e-06)) +
   scale_color_manual(
     limits = c('nf,f', 'f,f'),
-    labels = c('nf,f' = 'new', 'f,f' = 'conventional'),
+    labels = c('nf,f' = 'Proposed CNN', 'f,f' = 'Conventional'),
     values = c('nf,f' = 'green',
                'f,f' = 'red'),
-    name = 'Flare Detection Algorithm:'
+    name = 'Flare Identification Algorithm:'
   ) +
   theme_bw() +
   theme(
     legend.position = 'top',
+  ) +
+  labs(
+    title = 'Flux Values for February 2023',
+    subtitle = 'Source: GOES 16/17/18 data from NOAA',
+    x = 'Date (Time in UTC)',
+    y = 'XRS-b Flux'
   )
 
 fluxPlot3
 ggsave(filename = 'C:/Users/bklingen/Desktop/SolarFlareNN/Feb23Predictions.png', 
        plot = fluxPlot3,
        width = 6,
-       height = 3,
+       height = 4,
        units = 'in')
 
 # Save February23 file with observed and predicted flares:
-Feb23Fitted = Feb23Flares1 %>% select(-Date, -agree) %>% mutate(across(everything(), ~ c(.x)))
+Feb23Fitted = Feb23Flares1 %>% select(-agree) %>% mutate(across(everything(), ~ c(.x)))
 write_csv(Feb23Fitted, file = 'C:/Users/bklingen/Desktop/SolarFlareNN/Feb23Fitted.csv')
 ```
 
