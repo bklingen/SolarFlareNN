@@ -37,9 +37,9 @@ makeFlaredf <- function(goesNr = 16,
     download.file(fluxUrl, fluxDestFile, method = 'auto', mode='wb')
     Flux0 = nc_open(fluxDestFile)
     dfFlux = tibble(
-      secs_since_2000 = ncvar_get(Flux0, varid="time"),
+      secs_since_2000 = c(ncvar_get(Flux0, varid="time")),
       Date = as.POSIXct(secs_since_2000, tz="GMT", origin = "2000-01-01 12:00:00"),
-      Flux = ncvar_get(Flux0, varid=paste0("xrs",type,"_flux")),
+      Flux = c(ncvar_get(Flux0, varid=paste0("xrs",type,"_flux"))),
     )
     nc_close(Flux0)
     #file.remove(fluxDestFile)
@@ -65,8 +65,8 @@ makeFlaredf <- function(goesNr = 16,
     download.file(flareUrl, flareDestFile, method = 'auto', mode='wb')
     Flare0 = nc_open(flareDestFile)
     dfFlares = tibble(
-      secs_since_2000 = ncvar_get(Flare0, varid="time"),
-      Status = ncvar_get(Flare0, varid="status"),
+      secs_since_2000 = c(ncvar_get(Flare0, varid="time")),
+      Status = c(ncvar_get(Flare0, varid="status")),
     )
     nc_close(Flare0)
   } else {
@@ -82,6 +82,32 @@ makeFlaredf <- function(goesNr = 16,
 
   return(df %>% mutate(Flare = if_else(Status == 'EVENT_PEAK', 1, 0, missing = 0), GoesNr=goesNr))
 }
+```
+
+Similar function, but uses summary data for each year already made available on GOES website:
+WORK IN PROGRESS
+```{r}
+library(ncdf4)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(RCurl)
+## Download all known Flare Events so far for GOES 16:
+flareDestFile <- paste0("C:/Users/bklingen/Downloads/Flares/flare.nc")
+flareUrl = 'https://data.ngdc.noaa.gov/platforms/solar-space-observing-satellites/goes/goes16/l2/data/xrsf-l2-flsum_science/sci_xrsf-l2-flsum_g16_s20170209_e20230612_v2-2-0.nc'
+download.file(flareURL, flareDestFile, method = 'auto', mode='wb')
+Flare0 = nc_open(flareDestFile)
+dfFlares = tibble(
+       secs_since_2000 = c(ncvar_get(Flare0, varid="time")),
+       Status = c(ncvar_get(Flare0, varid="status")),
+)
+nc_close(Flare0)
+dfFlares = dfFlares %>% mutate(Date = as.POSIXct(secs_since_2000, tz="GMT", origin = "2000-01-01 12:00:00"))
+dfFlares %>% filter(Date >= '2021-01-01', Date <= '2021-12-31')
+
+
+## Now, get all files iin directory, so cn determine file name:
+httpGET('https://data.ngdc.noaa.gov/platforms/solar-space-observing-satellites/goes/goes16/l2/data/xrsf-l2-flsum_science/')
 ```
 
 ## Create 2021 datafile of all identified flares
