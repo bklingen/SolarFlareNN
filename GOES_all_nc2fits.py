@@ -1,0 +1,108 @@
+import netCDF4 as nc
+import numpy as np
+import cftime
+import matplotlib.pyplot as plt
+from datetime import datetime
+import os
+import requests
+from astropy.io import fits
+
+f16lc = "sci_xrsf-l2-avg1m_g16_s20170207_e20230604_v2-2-0.nc"
+lc16 = nc.Dataset(f16lc)
+time16 = np.array(lc16["time"][:])
+flxA16 = np.array(lc16["xrsa_flux"][:])
+flxB16 = np.array(lc16["xrsb_flux"][:])
+fxoA16 = np.array(lc16["xrsa_flux_observed"][:])
+fxoB16 = np.array(lc16["xrsb_flux_observed"][:])
+yy16 = cftime.num2pydate(lc16.variables["time"][:], lc16["time"].units)
+c1 = fits.Column(name='Time',array=time16, format='D')
+c2 = fits.Column(name='XRSA',array=flxA16, format='F')
+c3 = fits.Column(name='XRSB',array=flxB16, format='F')
+c4 = fits.Column(name='Date',array=yy16, format='20A')
+c5 = fits.Column(name='XRSAobs',array=fxoA16, format='F')
+c6 = fits.Column(name='XRSBobs',array=fxoB16, format='F')
+t = fits.BinTableHDU.from_columns([c1,c2,c3,c4,c5,c6])
+t.writeto("sci_xrsf-l2-avg1m_g16_s20170207_e20230604_v2-2-0.fits",overwrite=True)
+
+f17lc = "sci_xrsf-l2-avg1m_g17_s20180601_e20230110_v2-2-0.nc"
+lc17 = nc.Dataset(f17lc)
+time17 = np.array(lc17["time"][:])
+flxA17 = np.array(lc17["xrsa_flux"][:])
+flxB17 = np.array(lc17["xrsb_flux"][:])
+yy17 = cftime.num2pydate(lc17.variables["time"][:], lc17["time"].units)
+c1 = fits.Column(name='Time',array=time17, format='D')
+c2 = fits.Column(name='XRSA',array=flxA17, format='F')
+c3 = fits.Column(name='XRSB',array=flxB17, format='F')
+c4 = fits.Column(name='Date',array=yy17, format='20A')
+t = fits.BinTableHDU.from_columns([c1,c2,c3,c4])
+t.writeto("sci_xrsf-l2-avg1m_g17_s20180601_e20230110_v2-2-0.fits",overwrite=True)
+
+f18lc = "sci_xrsf-l2-avg1m_g18_s20220902_e20230606_v2-2-0.nc"
+lc18 = nc.Dataset(f18lc)
+time18 = np.array(lc18["time"][:])
+flxA18 = np.array(lc18["xrsa_flux"][:])
+flxB18 = np.array(lc18["xrsb_flux"][:])
+yy18 = cftime.num2pydate(lc18.variables["time"][:], lc18["time"].units)
+c1 = fits.Column(name='Time',array=time18, format='D')
+c2 = fits.Column(name='XRSA',array=flxA18, format='F')
+c3 = fits.Column(name='XRSB',array=flxB18, format='F')
+c4 = fits.Column(name='Date',array=yy18, format='20A')
+t = fits.BinTableHDU.from_columns([c1,c2,c3,c4])
+t.writeto("sci_xrsf-l2-avg1m_g18_s20220902_e20230606_v2-2-0.fits",overwrite=True)
+
+f16ls = "sci_xrsf-l2-flsum_g16_s20170209_e20230604_v2-2-0.nc"
+ls16 = nc.Dataset(f16ls)
+time16 = np.array(ls16["time"][:])
+flxB16 = np.array(ls16["xrsb_flux"][:])
+bkgB16 = np.array(ls16["background_flux"][:])
+class16 = np.array(ls16["flare_class"][:])
+intf16 = np.array(ls16["integrated_flux"][:])
+flrid16 = np.array(ls16["flare_id"][:])
+yy16 = cftime.num2pydate(ls16.variables["time"][:], ls16["time"].units)
+c1 = fits.Column(name='Time',array=time16, format='D')
+c2 = fits.Column(name='PeakfluxB',array=flxB16, format='F')
+c3 = fits.Column(name='BkgfluxB',array=bkgB16, format='F')
+c4 = fits.Column(name='TotfluxB',array=intf16, format='F')
+c5 = fits.Column(name='FlareClass',array=class16, format='5A')
+c6 = fits.Column(name='FlareID',array=flrid16, format='16A')
+c7 = fits.Column(name='Date',array=yy16, format='20A')
+t = fits.BinTableHDU.from_columns([c1,c2,c3,c4,c5,c6,c7])
+t.writeto("sci_xrsf-l2-flsum_g16_s20170209_e20230604_v2-2-0.fits",overwrite=True)
+
+f17ls = "sci_xrsf-l2-flsum_g17_s20180601_e20230110_v2-2-0.nc"
+ls17 = nc.Dataset(f17ls)
+time17 = np.array(ls17["time"][:])
+flxB17 = np.array(ls17["xrsb_flux"][:])
+bkgB17 = np.array(ls17["background_flux"][:])
+class17 = np.array(ls17["flare_class"][:])
+intf17 = np.array(ls17["integrated_flux"][:])
+flrid17 = np.array(ls17["flare_id"][:])
+yy17 = cftime.num2pydate(ls17.variables["time"][:], ls17["time"].units)
+c1 = fits.Column(name='Time',array=time17, format='D')
+c2 = fits.Column(name='PeakfluxB',array=flxB17, format='F')
+c3 = fits.Column(name='BkgfluxB',array=bkgB17, format='F')
+c4 = fits.Column(name='TotfluxB',array=intf17, format='F')
+c5 = fits.Column(name='FlareClass',array=class17, format='5A')
+c6 = fits.Column(name='FlareID',array=flrid17, format='17A')
+c7 = fits.Column(name='Date',array=yy17, format='20A')
+t = fits.BinTableHDU.from_columns([c1,c2,c3,c4,c5,c6,c7])
+t.writeto("sci_xrsf-l2-flsum_g17_s20180601_e20230110_v2-2-0.fits",overwrite=True)
+
+f18ls = "sci_xrsf-l2-flsum_g18_s20220905_e20230606_v2-2-0.nc"
+ls18 = nc.Dataset(f18ls)
+time18 = np.array(ls18["time"][:])
+flxB18 = np.array(ls18["xrsb_flux"][:])
+bkgB18 = np.array(ls18["background_flux"][:])
+class18 = np.array(ls18["flare_class"][:])
+intf18 = np.array(ls18["integrated_flux"][:])
+flrid18 = np.array(ls18["flare_id"][:])
+yy18 = cftime.num2pydate(ls18.variables["time"][:], ls18["time"].units)
+c1 = fits.Column(name='Time',array=time18, format='D')
+c2 = fits.Column(name='PeakfluxB',array=flxB18, format='F')
+c3 = fits.Column(name='BkgfluxB',array=bkgB18, format='F')
+c4 = fits.Column(name='TotfluxB',array=intf18, format='F')
+c5 = fits.Column(name='FlareClass',array=class18, format='5A')
+c6 = fits.Column(name='FlareID',array=flrid18, format='18A')
+c7 = fits.Column(name='Date',array=yy18, format='20A')
+t = fits.BinTableHDU.from_columns([c1,c2,c3,c4,c5,c6,c7])
+t.writeto("sci_xrsf-l2-flsum_g18_s20220905_e20230606_v2-2-0.fits",overwrite=True)
