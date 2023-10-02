@@ -1,0 +1,990 @@
+---
+title: "CreateFlareData using Wavelet Method"
+output: pdf_document
+date: "2023-05-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Function that obtains flare info from GOES website
+
+Write function that takes in the two nc files (one for 1-min flux, the other one for identified flares), and returns the dataset of 1-min peak-fluxes, with an additional column whether a flare was identified.
+```{r}
+library(ncdf4)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(RCurl)
+
+makeFlaredf <- function(goesNr = 16, 
+                        year = 2021, 
+                        month = '01', 
+                        day = '01',
+                        type='b') {
+  # Download 1-min flux info:
+  if(goesNr >= 16) {
+    fluxUrl0 = paste0('https://data.ngdc.noaa.gov/platforms/solar-space-observing-satellites/goes/goes', goesNr,'/l2/data/xrsf-l2-avg1m_science/', year, '/', month, '/')
+  } else {
+    fluxUrl0 = paste0('https://data.ngdc.noaa.gov/platforms/solar-space-observing-satellites/goes/goes', goesNr,'/l2/data/xrsf-l2-avg1m_science/', year, '/', month, '/')
+  }
+  fluxFileName = paste0('sci_xrsf-l2-avg1m_g', goesNr, '_d', year, month, day, '_v2-2-0.nc') 
+  fluxUrl = paste0(fluxUrl0,fluxFileName)
+  
+  if(url.exists(fluxUrl)) {
+    fluxDestFile <- paste0("C:/Users/bklingen/Downloads/Flares/flux.nc")
+    download.file(fluxUrl, fluxDestFile, method = 'auto', mode='wb')
+    Flux0 = nc_open(fluxDestFile)
+    dfFlux = tibble(
+      secs_since_2000 = c(ncvar_get(Flux0, varid="time")),
+      Date = as.POSIXct(secs_since_2000, tz="GMT", origin = "2000-01-01 12:00:00"),
+      Flux = c(ncvar_get(Flux0, varid=paste0("xrs",type,"_flux"))),
+    )
+    nc_close(Flux0)
+    #file.remove(fluxDestFile)
+  } else {
+    dfFlux = tibble(
+      secs_since_2000 = integer(),
+      Date = as.POSIXct(secs_since_2000, tz="GMT", origin = "2000-01-01 12:00:00"),
+      Flux = numeric(),
+    )
+  }
+    
+  # Download flare occurrence info:
+  if (goesNr >= 16) {
+    flareUrl0 = paste0('https://data.ngdc.noaa.gov/platforms/solar-space-observing-satellites/goes/goes', goesNr, '/l2/data/xrsf-l2-flsum_science/', year, '/', month, '/')
+  } else {
+    flareUrl0 = paste0('https://www.ncei.noaa.gov/data/goes-space-environment-monitor/access/science/xrs/goes', goesNr, '/xrsf-l2-flsum_science/', year, '/', month, '/')
+  }
+  flareFileName = paste0('sci_xrsf-l2-flsum_g', goesNr, '_d', year, month, day, '_v2-2-0.nc')
+  flareUrl = paste0(flareUrl0,flareFileName)
+  
+  if(url.exists(flareUrl)) {
+    flareDestFile <- paste0("C:/Users/bklingen/Downloads/Flares/flare.nc")
+    download.file(flareUrl, flareDestFile, method = 'auto', mode='wb')
+    Flare0 = nc_open(flareDestFile)
+    dfFlares = tibble(
+      secs_since_2000 = c(ncvar_get(Flare0, varid="time")),
+      Status = c(ncvar_get(Flare0, varid="status")),
+    )
+    nc_close(Flare0)
+  } else {
+    dfFlares = tibble(
+      secs_since_2000 = integer(),
+      Status = character(),
+    )
+  }
+  ## joint dfFlux and dfFlare data:
+  df = left_join( x = dfFlux,
+                  y = dfFlares,
+                  by = 'secs_since_2000')
+
+  return(df %>% mutate(Flare = if_else(Status == 'EVENT_PEAK', 1, 0, missing = 0), GoesNr=goesNr))
+}
+```
+
+Similar function, but uses summary data for each year already made available on GOES website:
+WORK IN PROGRESS
+```{r}
+library(ncdf4)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(RCurl)
+## Download all known Flare Events so far for GOES 16:
+flareDestFile <- paste0("C:/Users/bklingen/Downloads/Flares/flare.nc")
+flareUrl = 'https://data.ngdc.noaa.gov/platforms/solar-space-observing-satellites/goes/goes16/l2/data/xrsf-l2-flsum_science/sci_xrsf-l2-flsum_g16_s20170209_e20230612_v2-2-0.nc'
+download.file(flareURL, flareDestFile, method = 'auto', mode='wb')
+Flare0 = nc_open(flareDestFile)
+dfFlares = tibble(
+       secs_since_2000 = c(ncvar_get(Flare0, varid="time")),
+       Status = c(ncvar_get(Flare0, varid="status")),
+)
+nc_close(Flare0)
+dfFlares = dfFlares %>% mutate(Date = as.POSIXct(secs_since_2000, tz="GMT", origin = "2000-01-01 12:00:00"))
+dfFlares %>% filter(Date >= '2021-01-01', Date <= '2021-12-31')
+
+
+## Now, get all files iin directory, so cn determine file name:
+httpGET('https://data.ngdc.noaa.gov/platforms/solar-space-observing-satellites/goes/goes16/l2/data/xrsf-l2-flsum_science/')
+```
+
+## Create 2021 datafile of all identified flares
+We obtain a dataset of all identified flares and supplement (at a ratio of `nonflareMultiple` non-flare profiles for every one flare profile) the dataset with non-flare profiles
+
+Cycle over all 12 month in 2021, and Goes Satellites 16, 17 and 18:
+```{r}
+Flares2021 = tibble(
+      secs_since_2000 = integer(),
+      Date = as.Date(character()),
+      Flux = numeric(),
+      Status = character(),
+      Flare = integer(),
+      GoesNr = integer()
+)
+
+goesNr = c(16,17,18)
+monthDays = c(31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+monthNum = c('01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12') 
+
+for (goes in goesNr) {
+  for (k in 1:length(monthNum)) {
+    days <- formatC(seq(1, monthDays[k]), width = 2, format = "d", flag = "0")
+  
+    for(i in days) {
+      df0 = makeFlaredf(
+        goesNr = goes,
+        year = 2021,
+        month = monthNum[k],
+        day = i, 
+        type='b')
+      Flares2021 = bind_rows(Flares2021,df0)
+    }
+  }
+}
+
+Flares2021 %>% group_by(GoesNr) %>% select(GoesNr, Flare) %>% summarise(sum(Flare))
+## but this is not uniqued !!!
+```
+
+Merge the data from the three GOES satellites (GOES 16, 17 and 18) and have one entry per minute:
+```{r}
+Flare2021_byGoes = Flares2021 %>% group_split(GoesNr)
+Flares2021_Goes16 = Flare2021_byGoes[[1]]
+Flares2021_Goes17 = Flare2021_byGoes[[2]]
+## Flares2021_Goes18 = Flare2021_byGoes[[3]] ## no GOES18 data found
+Flares2021 = full_join(Flares2021_Goes16, Flares2021_Goes17, by=c('secs_since_2000', 'Date'), suffix=c('16','17')) %>%
+                       select('secs_since_2000',
+                              'Date',
+                              'Flux16',
+                              'Flux17',
+                              'Flare16',
+                              'Flare17',
+                            ) %>%
+                        mutate(Flux = Flux16, 
+                               Flare = as.numeric((Flare16 == 1) | (Flare17 == 1))
+                        )
+dim(Flares2021)
+# check how many minutes in year 2021:
+sum(monthDays)*24*60
+
+## NA analysis:
+Flares2021 %>% summarise(across(everything(), ~ sum(is.na(.x))))
+
+cor(Flares2021$Flux16, Flares2021$Flux17, use = 'complete.obs')
+library(ggplot2)
+ggplot(data=Flares2021, aes(x=Flux16, y=Flux17)) +
+    geom_abline(intercept=0, slope=1, color='red') +
+    geom_point(size=0.5) +
+
+
+## Saving file as object 'Flares2021'
+
+save(Flares2021, file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2021.r")
+
+
+load(file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2021.r")
+table(Flares2021$Flare16, Flares2021$Flare17)
+
+```
+
+
+Now, create a matrix with 61 columns, where column nr. 31 is the time point at which a flare occurred, columns 1 - hist are the values of the previous hist fluxes (so, going back hist minutes), and columns 32 - 61 are the values of the hist fluxes after the declared flare:
+```{r}
+## Load in Flares2021 dataset
+load(file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2021.r")
+flare_indices = which(Flares2021$Flare == 1) # adjust to only define flares based on GOES label
+numFlares = length(flare_indices)
+hist1 = 15 # mins before
+hist2 = 15 # mins after
+nonflareMultiple = 20 # how many non-flares per flare
+FlareProfiles = matrix(NA, nrow=numFlares, ncol=hist1 + hist2 + 1 + 1 + 1)
+j = 1
+for (i in flare_indices){
+  if(i > hist1 && i <= nrow(Flares2021) - hist2) {
+    FlareProfiles[j,] = c( ## standardize fluxes, equals 0 for flux at flare event
+      #(Flares2021$Flux[i] - Flares2021$Flux[(i-hist1) : (i + hist2)]) / Flares2021$Flux[i],
+      Flares2021$Flux[(i-hist1) : (i + hist2)] / Flares2021$Flux[i], ### STANDARDIZATION HERE - do we want to do this? - Try with/without
+      #Flares2021$Flux[(i-hist1) : (i + hist2)],
+      1,
+      Flares2021$secs_since_2000[i]
+    )
+    j = j + 1
+  }
+}
+
+## Controls: pick random index:
+set.seed(54321)
+NotFlareProfiles = matrix(NA, nrow=nonflareMultiple*numFlares, ncol=hist1 + hist2 + 1 + 1 + 1)
+nonflare_indices = setdiff( #rule out those within 3 minutes of peak flare # DEFINE BY WAVELET INTERVALS INSTEAD # 
+  c((hist1 + 1) : (nrow(Flares2021)- (hist2 + 1))), 
+  c(flare_indices, 
+    flare_indices - 1, flare_indices - 2, flare_indices - 3, flare_indices - 4, flare_indices - 5, flare_indices - 6,
+    flare_indices + 1, flare_indices + 2, flare_indices + 3, flare_indices - 4, flare_indices - 5, flare_indices - 6
+    )
+)
+j = 1
+for (i in sample(nonflare_indices, nonflareMultiple*numFlares)){ #select random index
+  NotFlareProfiles[j,] = c(
+    #(Flares2021$Flux[i] - Flares2021$Flux[(i-hist1) : (i + hist2)]) / Flares2021$Flux[i],
+    Flares2021$Flux[(i-hist1) : (i + hist2)] / Flares2021$Flux[i],
+    #Flares2021$Flux[(i-hist1) : (i + hist2)],
+    0,
+    Flares2021$secs_since_2000[i]
+  )
+  j = j + 1
+}
+
+library(tidyr)
+library(dplyr)
+library(readr)
+Profiles = rbind(FlareProfiles, NotFlareProfiles) #as_tibble(rbind(FlareProfiles, NotFlareProfiles))
+dim(Profiles)
+
+colnames(Profiles) = c(paste0('x', 1:(hist1 + hist2 + 1)), 'y', 'SecsSince2000')
+Profiles = as_tibble(Profiles)
+
+Profiles2021 = Profiles %>% 
+  drop_na() %>%  
+  mutate(Date = as.POSIXct(SecsSince2000, tz="GMT", origin = "2000-01-01 12:00:00")) %>% 
+  select(-SecsSince2000)
+
+dim(Profiles2021)
+# how many flares (some are dropped becasue of NA flux values):
+sum(Profiles2021[,hist1+hist2+1+1])
+# compare to:
+numFlares
+
+save(Profiles2021, file="C:/Users/bklingen/Desktop/SolarFlareNN/Profiles2021.r")
+library(readr)
+write_csv(as.data.frame(Profiles2021) , file="C:/Users/bklingen/Desktop/SolarFlareNN/Profiles2021.csv")
+```
+
+
+
+## Get dataset for 2022 data:
+Cycle over all 12 month in 2022:
+```{r}
+Flares2022 = tibble(
+      secs_since_2000 = integer(),
+      Date = as.Date(character()),
+      Flux = numeric(),
+      Status = character(),
+      Flare = integer(),
+      GoesNr = integer()
+)
+
+monthDays = c(31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+monthNum = c('01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12') 
+
+goesNr = c(16,17,18)
+
+for (goes in goesNr) {
+  for (k in 1:length(monthNum)) {
+    days <- formatC(seq(1, monthDays[k]), width = 2, format = "d", flag = "0")
+  
+    for(i in days) {
+      df0 = makeFlaredf(
+        goesNr = goes,
+        year = 2022,
+        month = monthNum[k],
+        day = i, 
+        type='b')
+      Flares2022 = bind_rows(Flares2022,df0)
+    }
+  }
+}
+
+Flares2022 %>% group_by(GoesNr) %>% select(GoesNr, Flare) %>% summarise(sum(Flare))
+## but this is not uniqued !!!
+```
+
+Merge the data from the three GOES satellites (GOES 16, 17 and 18) and have one entry per minute:
+```{r}
+Flare2022_byGoes = Flares2022 %>% group_split(GoesNr)
+Flares2022_Goes16 = Flare2022_byGoes[[1]]
+Flares2022_Goes17 = Flare2022_byGoes[[2]]
+Flares2022_Goes18 = Flare2022_byGoes[[3]]
+Flares2022_1617 = full_join(Flares2022_Goes16, Flares2022_Goes17, by=c('secs_since_2000', 'Date'), suffix=c('16','17'))
+Flares2022 = full_join(Flares2022_1617, Flares2022_Goes18, by=c('secs_since_2000', 'Date'), suffix=c('','18')) %>% select('secs_since_2000',
+                              'Date',
+                              'Flux16',
+                              'Flux17',
+                              Flux18 = Flux,
+                              'Flare16',
+                              'Flare17',
+                              Flare18 = Flare)
+dim(Flares2022)
+# check how many minutes in year 2022:
+sum(monthDays)*24*60
+
+## NA analysis:
+Flares2022 %>% summarise(across(everything(), ~ sum(is.na(.x))))
+
+## set missing values for Flares18 equal to 0:
+Flares2022$Flare18[is.na(Flares2022$Flare18)] = 0
+
+Flares2022 = Flares2022 %>% 
+  mutate(Flux = Flux16, Flare = as.numeric((Flare16 == 1) |  (Flare17 == 1) | (Flare18 == 1)))
+
+cor(cbind(Flares2022$Flux16, Flares2022$Flux17,  Flares2022$Flux18), use = 'pairwise.complete.obs')
+library(ggplot2)
+ggplot(data=Flares2022, aes(x=Flux16, y=Flux17)) +
+    geom_abline(intercept=0, slope=1, color='red') +
+    geom_point(size=0.5)
+
+ggplot(data=Flares2022, aes(x=Flux17, y=Flux18)) +
+    geom_abline(intercept=0, slope=1, color='red') +
+    geom_point(size=0.5)
+
+ggplot(data=Flares2022, aes(x=Flux16, y=Flux18)) +
+    geom_abline(intercept=0, slope=1, color='red') +
+    geom_point(size=0.5)
+
+## Saving file as object 'Flares2022'
+
+save(Flares2022, file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2022.r")
+
+
+load(file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2022.r")
+
+```
+
+
+
+Now, create a matrix with 61 columns, where column nr. 31 is the time point at which a flare occurred, columns 1 - hist are the values of the previous hist fluxes (so, going back hist minutes), and columns 32 - 61 are the values of the hist fluxes after the declared flare:
+```{r}
+## Load in Flares2022 dataset
+load(file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2022.r")
+flare_indices = which(Flares2022$Flare == 1)
+numFlares = length(flare_indices)
+FlareProfiles = matrix(NA, nrow=numFlares, ncol=hist1 + hist2 + 1 + 1 + 1)
+j = 1
+for (i in flare_indices){
+  if(i > hist1 && i <= nrow(Flares2022) - hist2) {
+    FlareProfiles[j,] = c( ## standardize fluxes, equals 0 for flux at flare event
+      #(Flares2022$Flux[i] - Flares2022$Flux[(i-hist1) : (i + hist2)]) / Flares2022$Flux[i],
+      Flares2022$Flux[(i-hist1) : (i + hist2)] / Flares2022$Flux[i],
+      #Flares2022$Flux[(i-hist1) : (i + hist2)],
+      1,
+      Flares2022$secs_since_2000[i]
+    )
+    j = j + 1
+  }
+}
+
+## Controls: pick random index:
+set.seed(333)
+NotFlareProfiles = matrix(NA, nrow=nonflareMultiple*numFlares, ncol=hist1 + hist2 + 1 + 1 + 1)
+nonflare_indices = setdiff( #rule out those within 3 minutes of peak flare
+  c((hist1 + 1) : (nrow(Flares2022)- (hist2 + 1))), 
+  c(flare_indices, 
+    flare_indices - 1, flare_indices - 2, flare_indices - 3, flare_indices - 4, flare_indices - 5, flare_indices - 6,
+    flare_indices + 1, flare_indices + 2, flare_indices + 3, flare_indices - 4, flare_indices - 5, flare_indices - 6
+    )
+)
+j = 1
+for (i in sample(nonflare_indices, nonflareMultiple*numFlares)){ #select random index
+  NotFlareProfiles[j,] = c(
+    #(Flares2022$Flux[i] - Flares2022$Flux[(i-hist1) : (i + hist2)]) / Flares2022$Flux[i],
+    Flares2022$Flux[(i-hist1) : (i + hist2)] / Flares2022$Flux[i],
+    #Flares2022$Flux[(i-hist1) : (i + hist2)],
+    0,
+    Flares2022$secs_since_2000[i]
+  )
+  j = j + 1
+}
+
+
+library(tidyr)
+library(dplyr)
+library(readr)
+Profiles = rbind(FlareProfiles, NotFlareProfiles) #as_tibble(rbind(FlareProfiles, NotFlareProfiles))
+dim(Profiles)
+
+colnames(Profiles) = c(paste0('x', 1:(hist1 + hist2 + 1)), 'y', 'SecsSince2000')
+Profiles = as_tibble(Profiles)
+
+Profiles2022 = Profiles %>% 
+  drop_na() %>%  
+  mutate(Date = as.POSIXct(SecsSince2000, tz="GMT", origin = "2000-01-01 12:00:00")) %>% 
+  select(-SecsSince2000)
+
+dim(Profiles2022)
+# how many flares (some are dropped becasue of NA flux values):
+sum(Profiles2022[,hist1+hist2+1+1])
+# compare to:
+numFlares
+
+save(Profiles2022, file="C:/Users/bklingen/Desktop/SolarFlareNN/Profiles2022.r")
+library(readr)
+write_csv(as.data.frame(Profiles2022) , file="C:/Users/bklingen/Desktop/SolarFlareNN/Profiles2022.csv")
+```
+
+
+## Combine 2021 and 2022 data:
+```{r}
+Profiles2122 = rbind(Profiles2021, Profiles2022)
+set.seed(999)
+ProfilesShuffeled2122 = Profiles2122[sample(1:nrow(Profiles2122)),]
+save(ProfilesShuffeled2122, file="C:/Users/bklingen/Desktop/SolarFlareNN/ProfilesShuffeled2122.r")
+write_csv(as.data.frame(ProfilesShuffeled2122) , file="C:/Users/bklingen/Desktop/SolarFlareNN/ProfilesShuffeled2122.csv")
+```
+
+## Obtain January 2021 1-min profiles
+```{r}
+Jan21Flares = Flares2021 %>% filter(Date < '2021-02-01')
+Jan21Indices = c((hist1 + 1) : (nrow(Jan21Flares) - (hist2 + 1)))
+
+Jan21FlareProfiles = matrix(NA, nrow = length(Jan21Indices), ncol = hist1 + hist2 + 1 + 1 + 1)
+j = 1
+for (i in Jan21Indices) {
+  Jan21FlareProfiles[j,] = c(
+    #(Jan21Flares$Flux[i] - Jan21Flares$Flux[(i-hist1) : (i + hist2)]) /Jan21Flares$Flux[i],
+    Jan21Flares$Flux[(i-hist1) : (i + hist2)] / Jan21Flares$Flux[i],
+    #Jan21Flares$Flux[(i-hist1) : (i + hist2)],
+    Jan21Flares$Flare[i],
+    Jan21Flares$secs_since_2000[i]
+  )
+  j = j + 1
+}
+write_csv(as.data.frame(Jan21FlareProfiles) , file="C:/Users/bklingen/Desktop/SolarFlareNN/Jan21FlareProfiles.csv")
+```
+
+## Load January Predictions from NN into R
+```{r}
+Jan21Pred = read_csv(file="C:/Users/bklingen/Desktop/SolarFlareNN/Jan21Predictions.csv", col_names='predProb')
+Jan21Flares1 = cbind(Jan21Flares[Jan21Indices,], Jan21Pred)
+cutoff = 0.5
+Jan21Flares1 = Jan21Flares1 %>% mutate(yhat = 1*(predProb > cutoff), 
+                                       agree = factor(10*Flare + yhat, levels = c(0,1,10,11), labels=c('nf,nf', 'nf,f', 'f,nf', 'f,f')))
+#head(Jan21Flares1)
+table(Jan21Flares1$Flare, Jan21Flares1$yhat)
+```
+Show GOES identified and not identified flares:
+```{r}
+library(ggplot2)
+
+fluxPlot = ggplot(data=Jan21Flares1, aes(x=Date, y=Flux)) + 
+  geom_vline(data=Jan21Flares1 %>% filter(yhat == 1, Flare == 0), aes(xintercept=Date), color='green', linewidth=0.6, alpha=0.5)
+
+fluxPlot1 = fluxPlot + geom_vline(data=Jan21Flares1 %>% filter(Flare == 1), aes(xintercept=Date), color='red', linewidth=0.6, alpha=0.5)
+
+fluxPlot2 = fluxPlot1 + 
+  geom_point() +
+  coord_cartesian(y = c(NA,5.1e-07))
+
+fluxPlot2
+```
+
+Or, coloring dots:
+```{r, fig.width=4, fig.height=1.5}
+library(ggplot2)
+
+summary(Jan21Flares1$agree)
+
+fluxPlot3 = ggplot(data=Jan21Flares1 %>% select(-Status) %>% drop_na() 
+                     # %>% filter(Date > '2021-01-13 2:00', Date < '2021-01-13 4:10')
+                   , aes(x=Date, y=Flux, fill = agree)) + 
+  geom_point(size = 1.6, pch=21, alpha=0.5, color='white') +
+  coord_cartesian(y = c(NA,5e-07)) +
+  scale_fill_manual(
+    limits = c('nf,f', 'f,f'),
+    labels = c('nf,f' = 'new', 'f,f' = 'conventional'),
+    values = c('nf,nf' = 'transparent', 
+               'nf,f' = 'green',
+               'f,nf' = 'blue',
+               'f,f' = 'red'),
+    name = 'Flare Detection Algorithm:'
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = 'top'
+  )
+
+fluxPlot3
+ggsave(filename = 'C:/Users/bklingen/Desktop/SolarFlareNN/Jan21Predictions.png', 
+       plot = fluxPlot3,
+       width = 6,
+       height = 3,
+       units = 'in')
+
+```
+
+## Obtain **February 2022** 1-min profiles
+```{r}
+Feb22Flares = Flares2022 %>% filter(Date > '2022-02-01 00:00', Date < '2022-03-01 23:59')
+Feb22Indices = c((hist1 + 1) : (nrow(Feb22Flares) - (hist2 + 1)))
+
+Feb22FlareProfiles = matrix(NA, nrow = length(Feb22Indices), ncol = hist1 + hist2 + 1 + 1 + 1)
+j = 1
+for (i in Feb22Indices) {
+  Feb22FlareProfiles[j,] = c(
+    #(Feb22Flares$Flux[i] - Feb22Flares$Flux[(i-hist1) : (i + hist2)]) /Feb22Flares$Flux[i],
+    Feb22Flares$Flux[(i-hist1) : (i + hist2)] / Feb22Flares$Flux[i],
+    #Feb22Flares$Flux[(i-hist1) : (i + hist2)],
+    Feb22Flares$Flare[i],
+    Feb22Flares$secs_since_2000[i]
+  )
+  j = j + 1
+}
+write_csv(as.data.frame(Feb22FlareProfiles) , file="C:/Users/bklingen/Desktop/SolarFlareNN/Feb22FlareProfiles.csv")
+```
+
+## Load February Predictions from NN into R
+```{r}
+Feb22Pred = read_csv(file="C:/Users/bklingen/Desktop/SolarFlareNN/Feb22Predictions.csv", col_names='predProb')
+Feb22Flares1 = cbind(Feb22Flares[Feb22Indices,], Feb22Pred)
+cutoff = 0.05
+Feb22Flares1 = Feb22Flares1 %>% mutate(yhat = 1*(predProb > cutoff), predProb = round(predProb,4),
+                                       agree = factor(10*Flare + yhat, levels = c(0,1,10,11), labels=c('nf,nf', 'nf,f', 'f,nf', 'f,f')))
+#head(Feb22Flares1)
+table(Feb22Flares1$Flare, Feb22Flares1$yhat)
+```
+Show GOES identified and not identified flares:
+```{r}
+library(ggplot2)
+
+fluxPlot = ggplot(data=Feb22Flares1, aes(x=Date, y=Flux)) + 
+  geom_vline(data=Feb22Flares1 %>% filter(yhat == 1, Flare == 0), aes(xintercept=Date), color='green', linewidth=0.6, alpha=0.5)
+
+fluxPlot1 = fluxPlot + geom_vline(data=Feb22Flares1 %>% filter(Flare == 1), aes(xintercept=Date), color='red', linewidth=0.6, alpha=0.5)
+
+fluxPlot2 = fluxPlot1 + 
+  geom_point() #+
+  #coord_cartesian(y = c(NA,5.1e-07))
+
+fluxPlot2
+```
+
+Or, coloring dots:
+```{r, fig.width=4, fig.height=1.5}
+library(ggplot2)
+
+summary(Feb22Flares1$agree)
+
+Feb22Plotdata = Feb22Flares1 %>% 
+  select(-Status) %>% 
+  drop_na() %>% 
+  filter(Date > '2022-02-02 00:00', Date < '2022-02-11 23:59') %>%
+  arrange()
+
+table(Feb22Plotdata$Flare, Feb22Plotdata$yhat)
+
+
+fluxPlot3 = ggplot(data=Feb22Plotdata
+                   , aes(x=Date, y=Flux)) + 
+  geom_point(data = Feb22Plotdata %>% filter(agree %in% c('f,f', 'nf,f')), aes(fill = agree), size = 1, pch=21, alpha=1, color='transparent') +
+  #geom_vline(data = Feb22Plotdata %>% filter(Flare == 1), aes(xintercept=Date), color='red', linewidth=0.3) +
+  geom_line(color=gray(0.2), alpha=0.6, linewidth=0.25) +
+  coord_cartesian(y = c(NA,6e-06)) +
+  scale_fill_manual(
+    limits = c('nf,f', 'f,f'),
+    labels = c('nf,f' = 'new', 'f,f' = 'conventional'),
+    values = c('nf,nf' = 'transparent',
+               'nf,f' = 'green',
+               'f,nf' = 'blue',
+               'f,f' = 'red'),
+    name = 'Flare Detection Algorithm:'
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = 'top',
+  )
+
+fluxPlot3
+ggsave(filename = 'C:/Users/bklingen/Desktop/SolarFlareNN/Feb22Predictions.png', 
+       plot = fluxPlot3,
+       width = 6,
+       height = 3,
+       units = 'in')
+```
+
+
+
+## Obtain some **February 2023** 1-min profiles
+First, need to generate flare2023 dataset:
+
+## Get dataset for 2023 data:
+Cycle over three months in 2023 for now:
+```{r}
+Flares2023 = tibble(
+      secs_since_2000 = integer(),
+      Date = as.Date(character()),
+      Flux = numeric(),
+      Status = character(),
+      Flare = integer(),
+      GoesNr = integer()
+)
+
+monthDays = c(31, 28, 31)
+monthNum = c('01', '02', '03') 
+
+goesNr = c(16,17,18)
+
+for (goes in goesNr) {
+  for (k in 1:length(monthNum)) {
+    days <- formatC(seq(1, monthDays[k]), width = 2, format = "d", flag = "0")
+  
+    for(i in days) {
+      df0 = makeFlaredf(
+        goesNr = goes,
+        year = 2023,
+        month = monthNum[k],
+        day = i, 
+        type='b')
+      Flares2023 = bind_rows(Flares2023,df0)
+    }
+  }
+}
+```
+
+Merge the three GOES flare detections (from GOES 16, 17) and have one entry per minute:
+```{r}
+Flare2023_byGoes = Flares2023 %>% group_split(GoesNr)
+Flares2023_Goes16 = Flare2023_byGoes[[1]]
+Flares2023_Goes17 = Flare2023_byGoes[[2]]
+Flares2023_Goes18 = Flare2023_byGoes[[3]]
+Flares2023_1617 = full_join(Flares2023_Goes16, Flares2023_Goes17, by=c('secs_since_2000', 'Date'), suffix=c('16','17'))
+Flares2023 = full_join(Flares2023_1617, Flares2023_Goes18, by=c('secs_since_2000', 'Date'), suffix=c('','18')) %>% select('secs_since_2000',
+                              'Date',
+                              'Flux16',
+                              'Flux17',
+                              Flux18 = Flux,
+                              'Flare16',
+                              'Flare17',
+                              Flare18 = Flare)
+
+dim(Flares2023)
+# check how many minutes in year 2023:
+sum(monthDays)*24*60
+
+## NA analysis:
+Flares2023 %>% summarise(across(everything(), ~ sum(is.na(.x))))
+
+## set missing values for Flares17 equal to 0:
+Flares2023$Flare17[is.na(Flares2023$Flare17)] = 0
+Flares2023 %>% summarise(across(everything(), ~ sum(is.na(.x))))
+
+
+Flares2023 = Flares2023 %>% 
+  mutate(Flux = Flux16, Flare = as.numeric((Flare16 == 1) |  (Flare17 == 1) | (Flare18 == 1)))
+
+cor(cbind(Flares2023$Flux16, Flares2023$Flux17,  Flares2023$Flux18), use = 'pairwise.complete.obs')
+library(ggplot2)
+ggplot(data=Flares2023, aes(x=Flux16, y=Flux17)) +
+    geom_abline(intercept=0, slope=1, color='red') +
+    geom_point(size=0.5)
+
+ggplot(data=Flares2023, aes(x=Flux17, y=Flux18)) +
+    geom_abline(intercept=0, slope=1, color='red') +
+    geom_point(size=0.5)
+
+ggplot(data=Flares2023, aes(x=Flux16, y=Flux18)) +
+    geom_abline(intercept=0, slope=1, color='red') +
+    geom_point(size=0.5)
+
+## Saving file as object 'Flares2023'
+
+save(Flares2023, file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2023.r")
+load(file="C:/Users/bklingen/Desktop/SolarFlareNN/Flares2023.r")
+```
+
+Now, get profiles for dates 2023-02-03 06:55:00 to 2023-02-04 17:03:00
+```{r}
+Feb23Flares = Flares2023 %>% select(secs_since_2000, Date, Flux, Flare) %>% filter(Date >= '2023-02-03 06:25:00', Date <= '2023-02-04 17:18:00')
+
+## NA analysis:
+Feb23Flares %>% summarise(across(everything(), ~ sum(is.na(.x))))
+
+## Missing Flux value corresponds to date: 2023-02-03 11:42:00
+## impute the flux value from the previous minute:
+Feb23Flares$Flux[Feb23Flares$Date == '2023-02-03 11:42:00'] = Feb23Flares$Flux[Feb23Flares$Date == '2023-02-03 11:41:00']
+Feb23Flares %>% summarise(across(everything(), ~ sum(is.na(.x))))
+
+Feb23Indices = c((hist1 + 1) : (nrow(Feb23Flares) - (hist2 + 1)))
+
+Feb23FlareProfiles = matrix(NA, nrow = length(Feb23Indices), ncol = hist1 + hist2 + 1 + 1 + 1)
+j = 1
+for (i in Feb23Indices) {
+  Feb23FlareProfiles[j,] = c(
+    #(Feb23Flares$Flux[i] - Feb23Flares$Flux[(i-hist1) : (i + hist2)]) /Feb23Flares$Flux[i],
+    Feb23Flares$Flux[(i-hist1) : (i + hist2)] / Feb23Flares$Flux[i],
+    #Feb23Flares$Flux[(i-hist1) : (i + hist2)],
+    Feb23Flares$Flare[i],
+    Feb23Flares$secs_since_2000[i]
+  )
+  j = j + 1
+}
+write_csv(as.data.frame(Feb23FlareProfiles) , file="C:/Users/bklingen/Desktop/SolarFlareNN/Feb23FlareProfiles.csv")
+```
+
+## Load February Predictions from NN into R
+```{r}
+Feb23Pred = read_csv(file="C:/Users/bklingen/Desktop/SolarFlareNN/Feb23Predictions.csv", col_names='predProb')
+Feb23Flares1 = cbind(Feb23Flares[Feb23Indices,], Feb23Pred)
+cutoff = 0.0221 #0.00270
+Feb23Flares1 = Feb23Flares1 %>% mutate(yhat = 1*(predProb > cutoff), predProb = round(predProb,5),
+                                       agree = factor(10*Flare + yhat, levels = c(0,1,10,11), labels=c('nf,nf', 'nf,f', 'f,nf', 'f,f')))
+#head(Feb23Flares1)
+table(Feb23Flares1$Flare, Feb23Flares1$yhat)
+
+library(ggplot2)
+
+fluxPlot = ggplot(data=Feb23Flares1, aes(x=Date, y=Flux)) + 
+  geom_vline(data=Feb23Flares1 %>% filter(yhat == 1, Flare == 0), aes(xintercept=Date), color='green', linewidth=0.6, alpha=0.5)
+
+fluxPlot1 = fluxPlot + geom_vline(data=Feb23Flares1 %>% filter(Flare == 1), aes(xintercept=Date), color='red', linewidth=0.6, alpha=0.5)
+
+fluxPlot2 = fluxPlot1 + 
+  geom_point() #+
+  #coord_cartesian(y = c(NA,5.1e-07))
+
+fluxPlot2
+```
+
+Or, coloring dots:
+```{r, fig.width=4, fig.height=3}
+library(ggplot2)
+
+summary(Feb23Flares1$agree)
+
+Feb23Plotdata = Feb23Flares1 %>% 
+  arrange()
+
+table(Feb23Plotdata$Flare, Feb23Plotdata$yhat)
+
+fluxPlot3 = ggplot(data=Feb23Plotdata, 
+                   aes(x=Date, y=Flux)) + 
+  # geom_point(data = Feb23Plotdata %>% filter(agree %in% c('nf,f')), size = 0.8, pch=19, color="green", alpha=0.5) +
+  # geom_point(data = Feb23Plotdata %>% filter(agree %in% c('f,f')), size = 0.8, pch=19, color="red", alpha=0.5) +
+  geom_point(data = Feb23Plotdata %>% filter(agree %in% c('nf,f', 'f,f')), aes(color=agree), size = 2, pch=19, alpha=0.6) +
+  #geom_vline(data = Feb23Plotdata %>% filter(Flare == 1), aes(xintercept=Date), color='red', linewidth=0.3) +
+  #geom_vline(data = Feb23Plotdata %>% filter(yhat == 1), aes(xintercept=Date), color='green', linewidth=0.3) +
+  geom_line(color=gray(0.25), alpha=0.8, linewidth=0.75) +
+  #coord_cartesian(y = c(NA,3e-06)) +
+  scale_color_manual(
+    limits = c('nf,f', 'f,f'),
+    labels = c('nf,f' = 'Proposed CNN', 'f,f' = 'Conventional'),
+    values = c('nf,f' = 'green',
+               'f,f' = 'red'),
+    name = 'Flare Identification Algorithm:'
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = 'top',
+  ) +
+  labs(
+    title = 'Flux Values for February 2023',
+    subtitle = 'Source: GOES 16/17/18 data from NOAA',
+    x = 'Date (Time in UTC)',
+    y = 'XRS-b Flux'
+  )
+
+fluxPlot3
+ggsave(filename = 'C:/Users/bklingen/Desktop/SolarFlareNN/Feb23Predictions.png', 
+       plot = fluxPlot3,
+       width = 6,
+       height = 4,
+       units = 'in')
+
+# Save February23 file with observed and predicted flares:
+Feb23Fitted = Feb23Flares1 %>% select(-agree) %>% mutate(across(everything(), ~ c(.x)))
+write_csv(Feb23Fitted, file = 'C:/Users/bklingen/Desktop/SolarFlareNN/Feb23Fitted.csv')
+```
+
+Zooming in on 2023-02-04 00:11 to 2023-02-04 00:59:
+```{r, fig.width=4, fig.height=1.5}
+library(ggplot2)
+
+# Look at just the one time period of that massice flux, with three flares superimposed that Vinay send in his email:
+Feb23Plotdata1 = Feb23Plotdata %>% filter(Date >= '2023-02-04 00:11', Date <= '2023-02-04 00:59')
+
+
+fluxPlot3 = ggplot(data=Feb23Plotdata1, 
+                   aes(x=Date, y=Flux)) + 
+  geom_point(data = Feb23Plotdata1 %>% filter(agree %in% c('nf,f')), size = 1, pch=19, color="green", alpha=0.5) +
+  geom_point(data = Feb23Plotdata1 %>% filter(agree %in% c('f,f')), size = 1, pch=19, color="red", alpha=0.5) +
+  #geom_vline(data = Feb23Plotdata1 %>% filter(Flare == 1), aes(xintercept=Date), color='red', linewidth=0.3) +
+  geom_point(pch=21, alpha=0.6, fill='transparent') +
+  #coord_cartesian(y = c(NA,3e-06)) +
+  scale_color_manual(
+    limits = c('nf,f', 'f,f'),
+    labels = c('nf,f' = 'new', 'f,f' = 'conventional'),
+    values = c('nf,f' = 'green',
+               'f,f' = 'red'),
+    name = 'Flare Detection Algorithm:'
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = 'top',
+  )
+
+fluxPlot3
+ggsave(filename = 'C:/Users/bklingen/Desktop/SolarFlareNN/Feb23Predictions1.png', 
+       plot = fluxPlot3,
+       width = 6,
+       height = 3,
+       units = 'in')
+```
+
+
+
+## Plot 2021 flare data
+```{r}
+library(ggplot2)
+ggplot(data = Flares2021 %>%
+         filter(Date > '2021-02-22 02:00', Date < '2021-02-22 08:00'),
+       aes(x = Date, y = Flux)
+       ) +
+  geom_line(size=0.1)
+  #coord_cartesian(ylim=c(NA, 0.5e-05))
+```
+
+
+
+
+
+
+## Plot 2021 flare data
+```{r}
+library(ggplot2)
+ggplot(data = Flares2021 %>%
+         filter(Date > '2021-02-22 02:00', Date < '2021-02-22 08:00'),
+       aes(x = Date, y = Flux)
+       ) +
+  geom_line(size=0.1)
+  #coord_cartesian(ylim=c(NA, 0.5e-05))
+```
+
+## Plot a specific profile
+```{r}
+ggplot(data = tibble(
+  flux = c(unlist(ProfilesShuffeled2122[1, 1:(hist1+hist2+1)])),
+  dates = seq(-60,30)
+),
+aes(x=dates, y=flux)) +
+  geom_point()
+```
+
+## Plot random flare profiles
+```{r fig.width=8}
+mult = hist1 + hist2 + 1
+exampleFluxes = tibble(
+    flux = c(c(t(FlareProfiles[c(22,30,31,36), (1:(hist1+hist2+1))])),
+             c(t(NotFlareProfiles[c(22, 25, 30, 32), (1:(hist1+hist2+1))]))
+    ),
+    flare = rep(rep(paste('Example', 1:4),2), each=mult),
+    type = rep(c('Flare','No Flare'), each = 4*mult),
+    dates = rep(seq(-hist1,hist2), 4*2)
+  )
+
+
+flareplot = ggplot(data = exampleFluxes, aes(x = dates, y = flux, color=type)) +
+  geom_hline(aes(yintercept = 1), color="gray") +
+  geom_vline(aes(xintercept = 0), color="gray") +
+  geom_point(size=1) +
+  facet_grid(rows = vars(type),
+             cols = vars(flare),
+             scales = "free_y"
+             #switch = 'y'
+             ) +
+  guides(
+    color='none'
+  ) +
+  theme_bw() +
+  labs(
+    x = 'Minutes',
+    y = 'Flux (W/m^2)'
+  )
+  #coord_cartesian(ylim=c(NA, 0.5e-05))
+
+flareplot
+
+ggsave(filename = 'C:/Users/bklingen/Desktop/SolarFlareNN/flareplot.png', 
+       plot = flareplot,
+       width = 6,
+       height = 3,
+       units = 'in')
+
+```
+
+## Flare Profiles: Wavelet
+
+```{r}
+# load in Flare data 2017-2022
+flares2017_2022 <- read_csv("/Users/joshuaingram/Main/Projects/SolarFlareNN/data/FlaresGoes161718Wavelet_2.csv")
+
+flare_indices <- which(flares2017_2022$Flare == 1)
+numFlares <- length(flare_indices)
+
+# window size = hist1+hist2+1
+hist1 = 15 # mins before
+hist2 = 15 # mins after
+nonflareMultiple = 20 # how many non-flares to generate for every flare
+
+FlareProfiles = matrix(NA, nrow = numFlares, ncol = hist1 + hist2 + 1 + 1 + 1)
+j = 1
+for (i in flare_indices){
+  if(i > hist1 && i <= nrow(flares2017_2022) - hist2) {
+    FlareProfiles[j,] = c( ## standardize fluxes, equals 0 for flux at flare event
+      #(Flares2021$Flux[i] - Flares2021$Flux[(i-hist1) : (i + hist2)]) / Flares2021$Flux[i],
+      flares2017_2022$Flux[(i-hist1) : (i + hist2)] / flares2017_2022$Flux[i], ### STANDARDIZATION HERE - do we want to do this? - Try with/without
+      #Flares2021$Flux[(i-hist1) : (i + hist2)],
+      1,
+      flares2017_2022$secs_since_2000[i]
+    )
+    j = j + 1
+  }
+}
+
+## Controls (non-flares): pick random index based on wavelet identifications
+wavelet_indices <- which(flares2017_2022$Wavelet == 1)
+set.seed(54321)
+NotFlareProfiles = matrix(NA, nrow=nonflareMultiple*numFlares, ncol=hist1 + hist2 + 1 + 1 + 1)
+nonflare_indices = setdiff( #rule out those within 5 minutes of peak flare identified by wavelets # DEFINE BY WAVELET INTERVALS INSTEAD # 
+  c((hist1 + 1) : (nrow(flares2017_2022)- (hist2 + 1))), 
+  c(wavelet_indices, 
+    wavelet_indices - 1, wavelet_indices - 2, wavelet_indices - 3, wavelet_indices - 4, wavelet_indices - 5,
+    wavelet_indices + 1, wavelet_indices + 2, wavelet_indices + 3, wavelet_indices + 4, wavelet_indices + 5
+    )
+)
+j = 1
+for (i in sample(nonflare_indices, nonflareMultiple*numFlares)){ #select random index
+  NotFlareProfiles[j,] = c(
+    #(Flares2021$Flux[i] - Flares2021$Flux[(i-hist1) : (i + hist2)]) / Flares2021$Flux[i],
+    flares2017_2022$Flux[(i-hist1) : (i + hist2)] / flares2017_2022$Flux[i],
+    #Flares2021$Flux[(i-hist1) : (i + hist2)],
+    0,
+    flares2017_2022$secs_since_2000[i]
+  )
+  j = j + 1
+}
+
+library(tidyr)
+library(dplyr)
+library(readr)
+Profiles = rbind(FlareProfiles, NotFlareProfiles) #as_tibble(rbind(FlareProfiles, NotFlareProfiles))
+dim(Profiles)
+
+colnames(Profiles) = c(paste0('x', 1:(hist1 + hist2 + 1)), 'y', 'SecsSince2000')
+Profiles = as_tibble(Profiles)
+
+Profiles2017_2022_wave = Profiles %>% 
+  drop_na() %>%  
+  mutate(Date = as.POSIXct(SecsSince2000, tz="GMT", origin = "2000-01-01 12:00:00")) %>% 
+  select(-SecsSince2000)
+
+dim(Profiles2017_2022_wave)
+# how many flares (some are dropped becasue of NA flux values):
+sum(Profiles2017_2022_wave[,hist1+hist2+1+1])
+# compare to:
+numFlares
+
+save(Profiles2017_2022_wave, file="/Users/joshuaingram/Main/Projects/SolarFlareNN/Profiles2017_2022_wave.r")
+library(readr)
+write_csv(as.data.frame(Profiles2017_2022_wave) , file="/Users/joshuaingram/Main/Projects/SolarFlareNN/Profiles2017_2022_wave.csv")
+```
+
+
