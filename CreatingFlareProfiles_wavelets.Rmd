@@ -913,6 +913,12 @@ ggsave(filename = 'C:/Users/bklingen/Desktop/SolarFlareNN/flareplot.png',
 ## Flare Profiles: Wavelet
 
 ```{r}
+library(ncdf4)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(RCurl)
+
 # load in Flare data 2017-2022
 flares2017_2022 <- read_csv("/Users/joshuaingram/Main/Projects/SolarFlareNN/data/FlaresGoes161718Wavelet_2.csv")
 
